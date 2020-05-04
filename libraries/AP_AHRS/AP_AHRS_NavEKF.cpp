@@ -1455,6 +1455,16 @@ void AP_AHRS_NavEKF::writeExtNavData(const Vector3f &pos, const Quaternion &quat
 #endif
 }
 
+// Writes the default equivalent airspeed in m/s to be used in forward flight if a measured airspeed is required and not available.
+void AP_AHRS_NavEKF::writeDefaultAirSpeed(float airspeed)
+{
+#if HAL_NAVEKF2_AVAILABLE
+    EKF2.writeDefaultAirSpeed(airspeed);
+#endif
+#if HAL_NAVEKF3_AVAILABLE
+    EKF3.writeDefaultAirSpeed(airspeed);
+#endif
+}
 
 // inhibit GPS usage
 uint8_t AP_AHRS_NavEKF::setInhibitGPS(void)
@@ -2141,6 +2151,32 @@ const Vector3f &AP_AHRS_NavEKF::get_accel_ef() const
     return get_accel_ef(get_primary_accel_index());
 }
 
+// return the index of the primary core or -1 if no primary core selected
+int8_t AP_AHRS_NavEKF::get_primary_core_index() const
+{
+    switch (active_EKF_type()) {
+    case EKFType::NONE:
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    case EKFType::SITL:
+#endif
+        // SITL and DCM have only one core
+        return 0;
+
+#if HAL_NAVEKF2_AVAILABLE
+    case EKFType::TWO:
+        return EKF2.getPrimaryCoreIndex();
+#endif
+
+#if HAL_NAVEKF3_AVAILABLE
+    case EKFType::THREE:
+        return EKF3.getPrimaryCoreIndex();
+#endif
+    }
+
+    // we should never get here
+    AP::internalerror().error(AP_InternalError::error_t::flow_of_control);
+    return -1;
+}
 
 // get the index of the current primary accelerometer sensor
 uint8_t AP_AHRS_NavEKF::get_primary_accel_index(void) const
@@ -2186,6 +2222,32 @@ void AP_AHRS_NavEKF::check_lane_switch(void)
     }
 }
 
+// request EKF yaw reset to try and avoid the need for an EKF lane switch or failsafe
+void AP_AHRS_NavEKF::request_yaw_reset(void)
+{
+    switch (active_EKF_type()) {
+    case EKFType::NONE:
+        break;
+
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+    case EKFType::SITL:
+        break;
+#endif
+
+#if HAL_NAVEKF2_AVAILABLE
+    case EKFType::TWO:
+        EKF2.requestYawReset();
+        break;
+#endif
+
+#if HAL_NAVEKF3_AVAILABLE
+    case EKFType::THREE:
+        EKF3.requestYawReset();
+        break;
+#endif
+    }
+}
+
 void AP_AHRS_NavEKF::Log_Write()
 {
 #if HAL_NAVEKF2_AVAILABLE
@@ -2212,6 +2274,7 @@ bool AP_AHRS_NavEKF::is_ext_nav_used_for_yaw(void) const
     case EKFType::NONE:
 #if HAL_NAVEKF3_AVAILABLE
     case EKFType::THREE:
+        return EKF3.using_external_yaw();
 #endif
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     case EKFType::SITL:

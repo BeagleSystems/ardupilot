@@ -930,7 +930,11 @@ void NavEKF3_core::writeEulerYawAngle(float yawAngle, float yawAngleErr, uint32_
     yawMeasTime_ms = timeStamp_ms;
 }
 
-
+// Writes the default equivalent airspeed in m/s to be used in forward flight if a measured airspeed is required and not available.
+void NavEKF3_core::writeDefaultAirSpeed(float airspeed)
+{
+    defaultAirSpeed = airspeed;
+}
 
 /*
   update timing statistics structure
@@ -1055,12 +1059,15 @@ float NavEKF3_core::MagDeclination(void) const
 /*
   Update the on ground and not moving check.
   Should be called once per IMU update.
-  Only updates when on ground and when operating with an external yaw sensor
+  Only updates when on ground and when operating without a magnetometer
 */
 void NavEKF3_core::updateMovementCheck(void)
 {
-    MagCal magcal = effective_magCal();
-    if (!(magcal == MagCal::EXTERNAL_YAW || magcal == MagCal::EXTERNAL_YAW_FALLBACK) && !onGround) {
+    if (!onGround &&
+        effectiveMagCal != MagCal::EXTERNAL_YAW &&
+        effectiveMagCal != MagCal::EXTERNAL_YAW_FALLBACK &&
+        effectiveMagCal != MagCal::GSF_YAW)
+    {
         onGroundNotMoving = false;
         return;
     }
@@ -1121,6 +1128,14 @@ void NavEKF3_core::updateMovementCheck(void)
 
     if (logStatusChange || imuSampleTime_ms - lastMoveCheckLogTime_ms > 200) {
         lastMoveCheckLogTime_ms = imuSampleTime_ms;
+// @LoggerMessage: XKFM
+// @Description: EKF3 diagnostic data for on-ground-and-not-moving check
+// @Field: TimeUS: Time since system startup
+// @Field: OGNM: True of on ground and not moving
+// @Field: GLR: Gyroscope length ratio
+// @Field: ALR: Accelerometer length ratio
+// @Field: GDR: Gyroscope rate of change ratio
+// @Field: ADR: Accelerometer rate of change ratio
         AP::logger().Write("XKFM",
                         "TimeUS,OGNM,GLR,ALR,GDR,ADR",
                         "s-----",

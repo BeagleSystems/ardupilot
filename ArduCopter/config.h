@@ -64,9 +64,7 @@
 #if FRAME_CONFIG == HELI_FRAME
   # define RC_FAST_SPEED                        125
   # define WP_YAW_BEHAVIOR_DEFAULT              WP_YAW_BEHAVIOR_LOOK_AHEAD
-  # define THR_MIN_DEFAULT                      0
   # define AUTOTUNE_ENABLED                     DISABLED
-  # define ACCEL_Z_P                            0.30f
 #endif
 
 //////////////////////////////////////////////////////////////////////////////
@@ -366,9 +364,6 @@
 // ZigZag - allow vehicle to fly in a zigzag manner with predefined point A B
 #ifndef MODE_ZIGZAG_ENABLED
 # define MODE_ZIGZAG_ENABLED !HAL_MINIMIZE_FEATURES
-#endif
-#if MODE_ZIGZAG_ENABLED == ENABLED && HAL_SPRAYER_ENABLED
-# define ZIGZAG_AUTO_PUMP_ENABLED DISABLED
 #endif
 
 //////////////////////////////////////////////////////////////////////////////

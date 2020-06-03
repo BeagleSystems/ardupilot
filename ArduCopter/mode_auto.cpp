@@ -302,7 +302,7 @@ void ModeAuto::circle_start()
     copter.circle_nav->init(copter.circle_nav->get_center(), copter.circle_nav->center_is_terrain_alt());
 
     if (auto_yaw.mode() != AUTO_YAW_ROI) {
-        auto_yaw.set_mode(AUTO_YAW_HOLD);
+        auto_yaw.set_mode(AUTO_YAW_CIRCLE);
     }
 }
 
@@ -771,7 +771,7 @@ void ModeAuto::spline_run()
     // process pilot's yaw input
     float target_yaw_rate = 0;
     if (!copter.failsafe.radio) {
-        // get pilot's desired yaw rat
+        // get pilot's desired yaw rate
         target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
         if (!is_zero(target_yaw_rate)) {
             auto_yaw.set_mode(AUTO_YAW_HOLD);
@@ -829,6 +829,16 @@ void ModeAuto::rtl_run()
 //      called by auto_run at 100hz or more
 void ModeAuto::circle_run()
 {
+    // process pilot's yaw input
+    float target_yaw_rate = 0;
+    if (!copter.failsafe.radio) {
+        // get pilot's desired yaw rate
+        target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
+        if (!is_zero(target_yaw_rate)) {
+            auto_yaw.set_mode(AUTO_YAW_HOLD);
+        }
+    }
+
     // call circle controller
     copter.failsafe_terrain_set_status(copter.circle_nav->update());
 
@@ -837,7 +847,7 @@ void ModeAuto::circle_run()
 
     if (auto_yaw.mode() == AUTO_YAW_HOLD) {
         // roll & pitch from waypoint controller, yaw rate from pilot
-        attitude_control->input_euler_angle_roll_pitch_yaw(copter.circle_nav->get_roll(), copter.circle_nav->get_pitch(), copter.circle_nav->get_yaw(), true);
+        attitude_control->input_euler_angle_roll_pitch_euler_rate_yaw(copter.circle_nav->get_roll(), copter.circle_nav->get_pitch(), target_yaw_rate);
     } else {
         // roll, pitch from waypoint controller, yaw heading from auto_heading()
         attitude_control->input_euler_angle_roll_pitch_yaw(copter.circle_nav->get_roll(), copter.circle_nav->get_pitch(), auto_yaw.yaw(), true);
@@ -1511,6 +1521,16 @@ bool ModeAuto::verify_land()
         case State::Descending:
             // rely on THROTTLE_LAND mode to correctly update landing status
             retval = copter.ap.land_complete && (motors->get_spool_state() == AP_Motors::SpoolState::GROUND_IDLE);
+            if (retval && !mission.continue_after_land() && copter.motors->armed()) {
+                /*
+                  we want to stop mission processing on land
+                  completion. Disarm now, then return false. This
+                  leaves mission state machine in the current NAV_LAND
+                  mission item. After disarming the mission will reset
+                */
+                copter.arming.disarm(AP_Arming::Method::LANDED);
+                retval = false;
+            }
             break;
 
         default:
@@ -1802,23 +1822,6 @@ bool ModeAuto::verify_circle(const AP_Mission::Mission_Command& cmd)
     // check if we've reached the edge
     if (mode() == Auto_CircleMoveToEdge) {
         if (copter.wp_nav->reached_wp_destination()) {
-            Vector3f circle_center;
-            if (!cmd.content.location.get_vector_from_origin_NEU(circle_center)) {
-                // should never happen
-                return true;
-            }
-            const Vector3f curr_pos = copter.inertial_nav.get_position();
-            // set target altitude if not provided
-            if (is_zero(circle_center.z)) {
-                circle_center.z = curr_pos.z;
-            }
-
-            // set lat/lon position if not provided
-            if (cmd.content.location.lat == 0 && cmd.content.location.lng == 0) {
-                circle_center.x = curr_pos.x;
-                circle_center.y = curr_pos.y;
-            }
-
             // start circling
             circle_start();
         }

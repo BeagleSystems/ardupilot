@@ -136,7 +136,7 @@ const AP_Param::Info Copter::var_info[] = {
     // @DisplayName: RTL Final Altitude
     // @Description: This is the altitude the vehicle will move to as the final stage of Returning to Launch or after completing a mission.  Set to zero to land.
     // @Units: cm
-    // @Range: -1 1000
+    // @Range: 0 1000
     // @Increment: 1
     // @User: Standard
     GSCALAR(rtl_alt_final,  "RTL_ALT_FINAL", RTL_ALT_FINAL),
@@ -696,7 +696,7 @@ const AP_Param::Info Copter::var_info[] = {
 #if MODE_THROW_ENABLED == ENABLED
     // @Param: THROW_MOT_START
     // @DisplayName: Start motors before throwing is detected
-    // @Description: Used by THROW mode. Controls whether motors will run at the speed set by THR_MIN or will be stopped when armed and waiting for the throw.
+    // @Description: Used by Throw mode. Controls whether motors will run at the speed set by MOT_SPIN_MIN or will be stopped when armed and waiting for the throw.
     // @Values: 0:Stopped,1:Running
     // @User: Standard
     GSCALAR(throw_motor_start, "THROW_MOT_START", 0),
@@ -754,7 +754,7 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
 
     // @Param: THROW_TYPE
     // @DisplayName: Type of Type
-    // @Description: Used by THROW mode. Specifies whether Copter is thrown upward or dropped.
+    // @Description: Used by Throw mode. Specifies whether Copter is thrown upward or dropped.
     // @Values: 0:Upward Throw,1:Drop
     // @User: Standard
     AP_GROUPINFO("THROW_TYPE", 4, ParametersG2, throw_type, ModeThrow::ThrowType_Upward),
@@ -963,15 +963,11 @@ const AP_Param::GroupInfo ParametersG2::var_info[] = {
     AP_SUBGROUPINFO(arot, "AROT_", 37, ParametersG2, AC_Autorotation),
 #endif
 
-#if MODE_ZIGZAG_ENABLED == ENABLED && SPRAYER_ENABLED == ENABLED
-    // @Param: ZIGZAG_AUTO_PUMP
-    // @DisplayName: Auto pump in ZigZag
-    // @Description: Enable the auto pump in ZigZag mode. SERVOx_FUNCTION = 22 (SprayerPump) and SPRAY_ENABLE = 1 also must be set. This makes the pump on while moving to destination A or B. The pump will stop if the vehicle reaches destination or the flight mode is changed from ZigZag to other.
-    // @Values: 0:Disabled,1:Enabled
-    // @User: Advanced
-    AP_GROUPINFO("ZIGZAG_AUTO_PUMP", 38, ParametersG2, zigzag_auto_pump_enabled, ZIGZAG_AUTO_PUMP_ENABLED),
+#if MODE_ZIGZAG_ENABLED == ENABLED
+    // @Group: ZIGZ_
+    // @Path: mode_zigzag.cpp
+    AP_SUBGROUPPTR(mode_zigzag_ptr, "ZIGZ_", 38, ParametersG2, ModeZigZag),
 #endif
-
 
     AP_GROUPEND
 };
@@ -1012,6 +1008,9 @@ ParametersG2::ParametersG2(void)
     ,arot(copter.inertial_nav)
 #endif
     ,button_ptr(&copter.button)
+#if MODE_ZIGZAG_ENABLED == ENABLED
+    ,mode_zigzag_ptr(&copter.mode_zigzag)
+#endif
 {
     AP_Param::setup_object_defaults(this, var_info);
 }

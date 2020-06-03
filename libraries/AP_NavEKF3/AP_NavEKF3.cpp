@@ -5,6 +5,7 @@
 #include <GCS_MAVLink/GCS.h>
 #include <AP_Logger/AP_Logger.h>
 #include <AP_GPS/AP_GPS.h>
+#include <AP_VisualOdom/AP_VisualOdom.h>
 #include <new>
 
 /*
@@ -84,7 +85,7 @@
 #define FLOW_MEAS_DELAY         10
 #define FLOW_M_NSE_DEFAULT      0.15f
 #define FLOW_I_GATE_DEFAULT     500
-#define CHECK_SCALER_DEFAULT    100
+#define CHECK_SCALER_DEFAULT    150
 #define FLOW_USE_DEFAULT        2
 
 #else
@@ -196,8 +197,8 @@ const AP_Param::GroupInfo NavEKF3::var_info[] = {
 
     // @Param: ALT_SOURCE
     // @DisplayName: Primary altitude sensor source
-    // @Description: Primary height sensor used by the EKF. If the selected option cannot be used, baro is used. 1 uses the range finder and only with optical flow navigation (EK2_GPS_TYPE = 3), Do not use "1" for terrain following. NOTE: the EK3_RNG_USE_HGT parameter can be used to switch to range-finder when close to the ground.
-    // @Values: 0:Use Baro, 1:Use Range Finder, 2:Use GPS, 3:Use Range Beacon
+    // @Description: Primary height sensor used by the EKF. If the selected option cannot be used, baro is used. 1 uses the range finder and only with optical flow navigation (EK3_GPS_TYPE = 3), Do not use "1" for terrain following. NOTE: the EK3_RNG_USE_HGT parameter can be used to switch to range-finder when close to the ground. Setting 4 uses external nav system data, but only if data is also being used for horizontal position
+    // @Values: 0:Use Baro, 1:Use Range Finder, 2:Use GPS, 3:Use Range Beacon, 4:Use External Nav
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO("ALT_SOURCE", 9, NavEKF3, _altSource, 0),
@@ -1315,6 +1316,42 @@ void NavEKF3::writeEulerYawAngle(float yawAngle, float yawAngleErr, uint32_t tim
     }
 }
 
+/*
+ * Write position and quaternion data from an external navigation system
+ *
+ * pos        : XYZ position (m) in a RH navigation frame with the Z axis pointing down and XY axes horizontal. Frame must be aligned with NED if the magnetomer is being used for yaw.
+ * quat       : quaternion describing the the rotation from navigation frame to body frame
+ * posErr     : 1-sigma spherical position error (m)
+ * angErr     : 1-sigma spherical angle error (rad)
+ * timeStamp_ms : system time the measurement was taken, not the time it was received (mSec)
+ * delay_ms   : average delay of external nav system measurements relative to inertial measurements
+ * resetTime_ms : system time of the last position reset request (mSec)
+ *
+*/
+void NavEKF3::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
+{
+    if (core) {
+        for (uint8_t i=0; i<num_cores; i++) {
+            core[i].writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
+        }
+    }
+}
+
+/* Write velocity data from an external navigation system
+ * vel : velocity in NED (m)
+ * err : velocity error (m/s)
+ * timeStamp_ms : system time the measurement was taken, not the time it was received (mSec)
+ * delay_ms : average delay of external nav system measurements relative to inertial measurements
+*/
+void NavEKF3::writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms)
+{
+    if (core) {
+        for (uint8_t i=0; i<num_cores; i++) {
+            core[i].writeExtNavVelData(vel, err, timeStamp_ms, delay_ms);
+        }
+    }
+}
+
 // return data for debugging optical flow fusion
 void NavEKF3::getFlowDebug(int8_t instance, float &varFlow, float &gndOffset, float &flowInnovX, float &flowInnovY, float &auxInnov,
                            float &HAGL, float &rngInnov, float &range, float &gndOffsetErr) const
@@ -1333,13 +1370,14 @@ void NavEKF3::getFlowDebug(int8_t instance, float &varFlow, float &gndOffset, fl
  * delAng is the XYZ angular rotation measured in body frame and relative to the inertial reference at timeStamp_ms (rad)
  * delTime is the time interval for the measurement of delPos and delAng (sec)
  * timeStamp_ms is the timestamp of the last image used to calculate delPos and delAng (msec)
+ * delay_ms is the average delay of external nav system measurements relative to inertial measurements
  * posOffset is the XYZ body frame position of the camera focal point (m)
 */
-void NavEKF3::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, const Vector3f &posOffset)
+void NavEKF3::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, uint16_t delay_ms, const Vector3f &posOffset)
 {
     if (core) {
         for (uint8_t i=0; i<num_cores; i++) {
-            core[i].writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, posOffset);
+            core[i].writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, delay_ms, posOffset);
         }
     }
 }

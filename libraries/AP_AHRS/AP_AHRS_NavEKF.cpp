@@ -388,7 +388,7 @@ void AP_AHRS_NavEKF::update_SITL(void)
             const Vector3f earth_vel(fdm.speedN,fdm.speedE,fdm.speedD);
             const Vector3f delPos = Tbn.transposed() * (earth_vel * delTime);
             // write to EKF
-            EKF3.writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, posOffset);
+            EKF3.writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, 0, posOffset);
         }
     }
 #endif // HAL_NAVEKF3_AVAILABLE
@@ -489,7 +489,12 @@ bool AP_AHRS_NavEKF::get_position(struct Location &loc) const
     }
 #endif
     }
-    return AP_AHRS_DCM::get_position(loc);
+
+    // fall back to position from DCM
+    if (!always_use_EKF()) {
+        return AP_AHRS_DCM::get_position(loc);
+    }
+    return false;
 }
 
 // status reporting of estimated errors
@@ -1440,18 +1445,21 @@ void  AP_AHRS_NavEKF::writeOptFlowMeas(const uint8_t rawFlowQuality, const Vecto
 }
 
 // write body frame odometry measurements to the EKF
-void  AP_AHRS_NavEKF::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, const Vector3f &posOffset)
+void  AP_AHRS_NavEKF::writeBodyFrameOdom(float quality, const Vector3f &delPos, const Vector3f &delAng, float delTime, uint32_t timeStamp_ms, uint16_t delay_ms, const Vector3f &posOffset)
 {
 #if HAL_NAVEKF3_AVAILABLE
-    EKF3.writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, posOffset);
+    EKF3.writeBodyFrameOdom(quality, delPos, delAng, delTime, timeStamp_ms, delay_ms, posOffset);
 #endif
 }
 
 // Write position and quaternion data from an external navigation system
-void AP_AHRS_NavEKF::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint32_t resetTime_ms)
+void AP_AHRS_NavEKF::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
 #if HAL_NAVEKF2_AVAILABLE
-    EKF2.writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, resetTime_ms);
+    EKF2.writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
+#endif
+#if HAL_NAVEKF3_AVAILABLE
+    EKF3.writeExtNavData(pos, quat, posErr, angErr, timeStamp_ms, delay_ms, resetTime_ms);
 #endif
 }
 
@@ -1463,6 +1471,17 @@ void AP_AHRS_NavEKF::writeDefaultAirSpeed(float airspeed)
 #endif
 #if HAL_NAVEKF3_AVAILABLE
     EKF3.writeDefaultAirSpeed(airspeed);
+#endif
+}
+
+// Write velocity data from an external navigation system
+void AP_AHRS_NavEKF::writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms)
+{
+#if HAL_NAVEKF2_AVAILABLE
+    EKF2.writeExtNavVelData(vel, err, timeStamp_ms, delay_ms);
+#endif
+#if HAL_NAVEKF3_AVAILABLE
+    EKF3.writeExtNavVelData(vel, err, timeStamp_ms, delay_ms);
 #endif
 }
 
@@ -2174,7 +2193,7 @@ int8_t AP_AHRS_NavEKF::get_primary_core_index() const
     }
 
     // we should never get here
-    AP::internalerror().error(AP_InternalError::error_t::flow_of_control);
+    INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
     return -1;
 }
 
@@ -2285,5 +2304,15 @@ bool AP_AHRS_NavEKF::is_ext_nav_used_for_yaw(void) const
     return false;
 }
 
-#endif // AP_AHRS_NAVEKF_AVAILABLE
+// set and save the alt noise parameter value
+void AP_AHRS_NavEKF::set_alt_measurement_noise(float noise)
+{
+#if HAL_NAVEKF2_AVAILABLE
+    EKF2.set_baro_alt_noise(noise);
+#endif
+#if HAL_NAVEKF3_AVAILABLE
+    EKF3.set_baro_alt_noise(noise);
+#endif
+}
 
+#endif // AP_AHRS_NAVEKF_AVAILABLE

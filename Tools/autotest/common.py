@@ -3,6 +3,7 @@ from __future__ import print_function
 import abc
 import copy
 import errno
+import glob
 import math
 import os
 import re
@@ -16,6 +17,7 @@ import operator
 import numpy
 import socket
 import struct
+import random
 
 from MAVProxy.modules.lib import mp_util
 
@@ -709,6 +711,10 @@ class AutoTest(ABC):
                  _show_test_timings=False,
                  force_ahrs_type=None):
 
+        self.start_time = time.time()
+        global __autotest__ # FIXME; make progress a non-staticmethod
+        __autotest__ = self
+
         if binary is None:
             raise ValueError("Should always have a binary")
 
@@ -748,7 +754,9 @@ class AutoTest(ABC):
     @staticmethod
     def progress(text):
         """Display autotest progress text."""
-        print("AUTOTEST: " + text)
+        global __autotest__
+        delta_time = time.time() - __autotest__.start_time
+        print("AT-%06.1f: %s" % (delta_time,text))
 
     # following two functions swiped from autotest.py:
     @staticmethod
@@ -1523,6 +1531,250 @@ class AutoTest(ABC):
 
         self.progress("Drained %u messages from mav (%s)" % (count, rate))
 
+    def log_filepath(self, lognum):
+        '''return filepath to lognum (where lognum comes from LOG_ENTRY'''
+        log_list = sorted(self.log_list())
+        return log_list[lognum-1]
+
+    def assert_bytes_equal(self, bytes1, bytes2):
+        for i in range(0,len(bytes1)):
+            if bytes1[i] != bytes2[i]:
+                raise NotAchievedException("differ at offset %u" % i)
+
+    def test_log_download(self):
+        if self.is_tracker():
+            # tracker starts armed, which is annoying
+            return
+        self.progress("Ensuring we have contents we care about")
+        self.set_parameter("LOG_FILE_DSRMROT", 1)
+        self.set_parameter("LOG_DISARMED", 0)
+        self.reboot_sitl()
+        original_log_list = self.log_list()
+        for i in range(0,10):
+            self.wait_ready_to_arm()
+            self.arm_vehicle()
+            self.delay_sim_time(1)
+            self.disarm_vehicle()
+        new_log_list = self.log_list()
+        new_log_count = len(new_log_list) - len(original_log_list)
+        if new_log_count != 10:
+            raise NotAchievedException("Expected exactly 10 new logs got %u (%s) to (%s)" %
+                                       (new_log_count, original_log_list, new_log_list))
+        self.progress("Directory contents: %s" % str(new_log_list))
+
+        tstart = self.get_sim_time()
+        self.mav.mav.log_request_list_send(self.sysid_thismav(),
+                                           1, # target component
+                                           0,
+                                           0xff)
+        logs = []
+        last_id = None
+        num_logs = None
+        while True:
+            now = self.get_sim_time_cached()
+            if now - tstart > 5:
+                raise NotAchievedException("Did not download list")
+            m = self.mav.recv_match(type='LOG_ENTRY',
+                                    blocking=True,
+                                    timeout=1)
+            print("Received (%s)" % str(m))
+            if m is None:
+                continue
+            logs.append(m)
+            if last_id is None:
+                if m.num_logs == 0:
+                    # caller to guarantee this works:
+                    raise NotAchievedException("num_logs is zero")
+                num_logs = m.num_logs
+            else:
+                if m.id != last_id + 1:
+                    raise NotAchievedException("Sequence not increasing")
+                if m.num_logs != num_logs:
+                    raise NotAchievedException("Number of logs changed")
+                if m.time_utc < 1000:
+                    raise NotAchievedException("Bad timestamp")
+                if m.id != m.last_log_num:
+                    if m.size == 0:
+                        raise NotAchievedException("Zero-sized log")
+            last_id = m.id
+            if m.id == m.last_log_num:
+                self.progress("Got all logs")
+                break
+
+        # ensure we don't get any extras:
+        m = self.mav.recv_match(type='LOG_ENTRY',
+                                blocking=True,
+                                timeout=2)
+        if m is not None:
+            raise NotAchievedException("Received extra LOG_ENTRY?!")
+
+        # download  the 6th and seventh byte of the fifth log
+        log_id = 5
+        ofs = 6
+        count = 2
+        self.mav.mav.log_request_data_send(self.sysid_thismav(),
+                                           1, # target component
+                                           log_id,
+                                           ofs,
+                                           count
+        )
+        m = self.mav.recv_match(type='LOG_DATA',
+                                blocking=True,
+                                timeout=2)
+        if m is None:
+            raise NotAchievedException("Did not get log data")
+        if m.ofs != ofs:
+            raise NotAchievedException("Incorrect offset")
+        if m.count != count:
+            raise NotAchievedException("Did not get correct number of bytes")
+        log_filepath = self.log_filepath(log_id)
+        self.progress("Checking against log_filepath (%s)" % str(log_filepath))
+        with open(log_filepath, "rb") as bob:
+            bob.seek(ofs)
+            actual_bytes = bob.read(2)
+            actual_bytes = bytearray(actual_bytes)
+        if m.data[0] != actual_bytes[0]:
+            raise NotAchievedException("Bad first byte got=(0x%02x) want=(0x%02x)" %
+                                       (m.data[0], actual_bytes[0]))
+        if m.data[1] != actual_bytes[1]:
+            raise NotAchievedException("Bad second byte")
+
+        # make file contents available
+        # download an entire file
+        log_id = 7
+        log_filepath = self.log_filepath(log_id)
+        with open(log_filepath, "rb") as bob:
+            actual_bytes = bytearray(bob.read())
+
+        # get the size first
+        self.mav.mav.log_request_list_send(self.sysid_thismav(),
+                                           1, # target component
+                                           log_id,
+                                           log_id)
+        log_entry = self.mav.recv_match(type='LOG_ENTRY',
+                                        blocking=True,
+                                        timeout=2)
+        if log_entry.size != len(actual_bytes):
+            raise NotAchievedException("Incorrect bytecount")
+        self.progress("Using log entry (%s)" % str(log_entry))
+        if log_entry.id != log_id:
+            raise NotAchievedException("Incorrect log id received")
+
+        # download the log file in the normal way:
+        bytes_to_fetch = 10000000
+        self.progress("Sending request for %u bytes at offset 0" % (bytes_to_fetch,))
+        tstart = self.get_sim_time()
+        self.mav.mav.log_request_data_send(
+            self.sysid_thismav(),
+            1, # target component
+            log_id,
+            0,
+            bytes_to_fetch
+        )
+        bytes_to_read = log_entry.size
+        data_downloaded = []
+        bytes_read = 0
+        last_print = 0
+        while True:
+            if bytes_read >= bytes_to_read:
+                break
+            if self.get_sim_time_cached() - tstart > 120:
+                raise NotAchievedException("Did not download log in good time")
+            m = self.mav.recv_match(type='LOG_DATA',
+                                    blocking=True,
+                                    timeout=2)
+            if m is None:
+                raise NotAchievedException("Did not get data")
+            if m.ofs != bytes_read:
+                raise NotAchievedException("Unexpected offset")
+            if m.id != log_id:
+                raise NotAchievedException("Unexpected id")
+            data_downloaded.extend(m.data[0:m.count])
+            bytes_read += m.count
+            #self.progress("Read %u bytes at offset %u" % (m.count, m.ofs))
+            if time.time() - last_print > 10:
+                last_print = time.time()
+                self.progress("Read %u/%u" % (bytes_read, bytes_to_read))
+
+        self.progress("actual_bytes_len=%u data_downloaded_len=%u" %
+                      (len(actual_bytes), len(data_downloaded)))
+        self.assert_bytes_equal(actual_bytes, data_downloaded)
+
+        if False:
+            bytes_to_read = log_entry.size
+            bytes_read = 0
+            data_downloaded = []
+            while bytes_read < bytes_to_read:
+                bytes_to_fetch = int(random.random() * 100)
+                if bytes_to_fetch > 90:
+                    bytes_to_fetch = 90
+                self.progress("Sending request for %u bytes at offset %u" % (bytes_to_fetch, bytes_read))
+                self.mav.mav.log_request_data_send(
+                    self.sysid_thismav(),
+                    1, # target component
+                    log_id,
+                    bytes_read,
+                    bytes_to_fetch
+                )
+                m = self.mav.recv_match(type='LOG_DATA',
+                                        blocking=True,
+                                        timeout=2)
+                if m is None:
+                    raise NotAchievedException("Did not get reply")
+                self.progress("Read %u bytes at offset %u" % (m.count, m.ofs))
+                if m.ofs != bytes_read:
+                    raise NotAchievedException("Incorrect offset in reply want=%u got=%u (%s)" % (bytes_read, m.ofs, str(m)))
+                stuff = m.data[0:m.count]
+                data_downloaded.extend(stuff)
+                bytes_read += m.count
+                if len(data_downloaded) != bytes_read:
+                    raise NotAchievedException("extend fail")
+
+            if len(actual_bytes) != len(data_downloaded):
+                raise NotAchievedException("Incorrect length: disk:%u downloaded: %u" %
+                                           (len(actual_bytes), len(data_downloaded)))
+            self.assert_bytes_equal(actual_bytes, data_downloaded)
+
+        # ... and now download it reading backwards...
+        bytes_to_read = log_entry.size
+        bytes_read = 0
+        backwards_data_downloaded = []
+        last_print = 0
+        while bytes_read < bytes_to_read:
+            bytes_to_fetch = int(random.random() * 100)
+            if bytes_to_fetch > 90:
+                bytes_to_fetch = 90
+            if bytes_to_fetch > bytes_to_read - bytes_read:
+                bytes_to_fetch = bytes_to_read - bytes_read
+            ofs = bytes_to_read - bytes_read - bytes_to_fetch
+            # self.progress("bytes_to_read=%u bytes_read=%u bytes_to_fetch=%u ofs=%d" % (bytes_to_read, bytes_read, bytes_to_fetch, ofs))
+            self.mav.mav.log_request_data_send(
+                self.sysid_thismav(),
+                1, # target component
+                log_id,
+                ofs,
+                bytes_to_fetch
+            )
+            m = self.mav.recv_match(type='LOG_DATA',
+                                    blocking=True,
+                                    timeout=2)
+            if m is None:
+                raise NotAchievedException("Did not get reply")
+            stuff = m.data[0:m.count]
+            stuff.extend(backwards_data_downloaded)
+            backwards_data_downloaded = stuff
+            bytes_read += m.count
+            # self.progress("Read %u bytes at offset %u" % (m.count, m.ofs))
+            if time.time() - last_print > 10:
+                last_print = time.time()
+                self.progress("Read %u/%u" % (bytes_read, bytes_to_read))
+
+        self.assert_bytes_equal(actual_bytes, backwards_data_downloaded)
+        if len(actual_bytes) != len(backwards_data_downloaded):
+            raise NotAchievedException("Size delta: actual=%u vs downloaded=%u" %
+                                       (len(actual_bytes), len(backwards_data_downloaded)))
+
+
     #################################################
     # SIM UTILITIES
     #################################################
@@ -1568,9 +1820,174 @@ class AutoTest(ABC):
         self.mavproxy.send('wp list\n')
         self.mavproxy.expect('Requesting 0 waypoints')
 
-    def log_download(self, filename, timeout=360, upload_logs=False):
+    def log_list(self):
+        '''return a list of log files present in POSIX-style loging dir'''
+        ret = glob.glob("logs/*.BIN")
+        self.progress("log list: %s" % str(ret))
+        return ret
+
+    def assert_parameter_value(self, parameter, required):
+        got = self.get_parameter(parameter)
+        if got != required:
+            raise NotAchievedException("%s has unexpected value; want=%f got=%f" %
+                                       (parameter, required, got))
+        self.progress("%s has value %f" % (parameter, required))
+
+    def onboard_logging_not_log_disarmed(self):
+        self.set_parameter("LOG_DISARMED", 0)
+        self.set_parameter("LOG_FILE_DSRMROT", 0)
+        self.reboot_sitl()
+        self.wait_ready_to_arm() # let things setttle
+        self.start_subtest("Ensure setting LOG_DISARMED yields a new file")
+        original_list = self.log_list()
+        self.progress("original list: %s" % str(original_list))
+        self.set_parameter("LOG_DISARMED", 1)
+        self.delay_sim_time(1) # LOG_DISARMED is polled by the logger code
+        new_list = self.log_list()
+        self.progress("new list: %s" % str(new_list))
+        if len(new_list) - len(original_list) != 1:
+            raise NotAchievedException("Got more than one new log")
+        self.set_parameter("LOG_DISARMED", 0)
+        self.delay_sim_time(1) # LOG_DISARMED is polled by the logger code
+        new_list = self.log_list()
+        if len(new_list) - len(original_list) != 1:
+            raise NotAchievedException("Got more or less than one new log after toggling LOG_DISARMED off")
+
+        self.start_subtest("Ensuring toggling LOG_DISARMED on and off doesn't increase the number of files")
+        self.set_parameter("LOG_DISARMED", 1)
+        self.delay_sim_time(1) # LOG_DISARMED is polled by the logger code
+        new_new_list = self.log_list()
+        if len(new_new_list) != len(new_list):
+            raise NotAchievedException("Got extra files when toggling LOG_DISARMED")
+        self.set_parameter("LOG_DISARMED", 0)
+        self.delay_sim_time(1) # LOG_DISARMED is polled by the logger code
+        new_new_list = self.log_list()
+        if len(new_new_list) != len(new_list):
+            raise NotAchievedException("Got extra files when toggling LOG_DISARMED to 0 again")
+        self.end_subtest("Ensuring toggling LOG_DISARMED on and off doesn't increase the number of files")
+
+        self.start_subtest("Check disarm rot when log disarmed is zero")
+        self.assert_parameter_value("LOG_DISARMED", 0)
+        self.set_parameter("LOG_FILE_DSRMROT", 1)
+        old_speedup = self.get_parameter("SIM_SPEEDUP")
+        # reduce speedup to reduce chance of race condition here
+        self.set_parameter("SIM_SPEEDUP", 1)
+        pre_armed_list = self.log_list()
+        if self.is_copter() or self.is_heli():
+            self.set_parameter("DISARM_DELAY", 0)
+        self.arm_vehicle()
+        post_armed_list = self.log_list()
+        if len(post_armed_list) != len(pre_armed_list):
+            raise NotAchievedException("Got unexpected new log")
+        self.disarm_vehicle()
+        old_speedup = self.set_parameter("SIM_SPEEDUP", old_speedup)
+        post_disarmed_list = self.log_list()
+        if len(post_disarmed_list) != len(post_armed_list):
+            raise NotAchievedException("Log rotated immediately")
+        self.progress("Allowing time for post-disarm-logging to occur if it will")
+        self.delay_sim_time(5)
+        post_disarmed_post_delay_list = self.log_list()
+        if len(post_disarmed_post_delay_list) != len(post_disarmed_list):
+            raise NotAchievedException("Got log rotation when we shouldn't have")
+        self.progress("Checking that arming does produce a new log")
+        self.arm_vehicle()
+        post_armed_list = self.log_list()
+        if len(post_armed_list) - len(post_disarmed_post_delay_list) != 1:
+            raise NotAchievedException("Did not get new log for rotation")
+        self.progress("Now checking natural rotation after HAL_LOGGER_ARM_PERSIST")
+        self.disarm_vehicle()
+        post_disarmed_list = self.log_list()
+        if len(post_disarmed_list) != len(post_armed_list):
+            raise NotAchievedException("Log rotated immediately")
+        self.delay_sim_time(30)
+        delayed_post_disarmed_list = self.log_list()
+        # should *still* not get another log as LOG_DISARMED is false
+        if len(post_disarmed_list) != len(delayed_post_disarmed_list):
+            self.progress("Unexpected new log found")
+
+    def onboard_logging_log_disarmed(self):
+        start_list = self.log_list()
+        self.set_parameter("LOG_FILE_DSRMROT", 0)
+        self.set_parameter("LOG_DISARMED", 0)
+        self.reboot_sitl()
+        restart_list = self.log_list()
+        if len(start_list) != len(restart_list):
+            raise NotAchievedException("Unexpected log detected (pre-delay) initial=(%s) restart=(%s)" % (str(sorted(start_list)), str(sorted(restart_list))))
+        self.delay_sim_time(20)
+        restart_list = self.log_list()
+        if len(start_list) != len(restart_list):
+            raise NotAchievedException("Unexpected log detected (post-delay)")
+        self.set_parameter("LOG_DISARMED", 1)
+        self.delay_sim_time(5) # LOG_DISARMED is polled
+        post_log_disarmed_set_list = self.log_list()
+        if len(post_log_disarmed_set_list) == len(restart_list):
+            raise NotAchievedException("Did not get new log when LOG_DISARMED set")
+        self.progress("Ensuring we get a new log after a reboot")
+        self.reboot_sitl()
+        self.delay_sim_time(5)
+        post_reboot_log_list = self.log_list()
+        if len(post_reboot_log_list) == len(post_log_disarmed_set_list):
+            raise NotAchievedException("Did not get fresh log-disarmed log after a reboot")
+        self.progress("Ensuring no log rotation when we toggle LOG_DISARMED off then on again")
+        self.set_parameter("LOG_DISARMED", 0)
+        current_log_filepath = self.current_onboard_log_filepath()
+        self.delay_sim_time(10) # LOG_DISARMED is polled
+        post_toggleoff_list = self.log_list()
+        if len(post_toggleoff_list) != len(post_reboot_log_list):
+            raise NotAchievedException("Shouldn't get new file yet")
+        self.progress("Ensuring log does not grow when LOG_DISARMED unset...")
+        current_log_filepath_size = os.path.getsize(current_log_filepath)
+        self.delay_sim_time(5)
+        current_log_filepath_new_size = os.path.getsize(current_log_filepath)
+        if current_log_filepath_new_size != current_log_filepath_size:
+            raise NotAchievedException(
+                "File growing after LOG_DISARMED unset (new=%u old=%u" %
+                (current_log_filepath_new_size, current_log_filepath_size))
+        self.progress("Turning LOG_DISARMED back on again")
+        self.set_parameter("LOG_DISARMED", 1)
+        self.delay_sim_time(5) # LOG_DISARMED is polled
+        post_toggleon_list = self.log_list()
+        if len(post_toggleon_list) != len(post_toggleoff_list):
+            raise NotAchievedException("Log rotated when it shouldn't")
+        self.progress("Checking log is now growing again")
+        if os.path.getsize(current_log_filepath) == current_log_filepath_size:
+            raise NotAchievedException("Log is not growing")
+
+        # self.progress("Checking LOG_FILE_DSRMROT behaviour when log_DISARMED set")
+        # self.set_parameter("LOG_FILE_DSRMROT", 1)
+        # self.wait_ready_to_arm()
+        # pre = self.log_list()
+        # self.arm_vehicle()
+        # post = self.log_list()
+        # if len(pre) != len(post):
+        #     raise NotAchievedException("Rotation happened on arming?!")
+        # size_a = os.path.getsize(current_log_filepath)
+        # self.delay_sim_time(5)
+        # size_b = os.path.getsize(current_log_filepath)
+        # if size_b <= size_a:
+        #     raise NotAchievedException("Log not growing")
+        # self.disarm_vehicle()
+        # instant_post_disarm_list = self.log_list()
+        # self.progress("Should not rotate straight away")
+        # if len(instant_post_disarm_list) != len(post):
+        #     raise NotAchievedException("Should not rotate straight away")
+        # self.delay_sim_time(20)
+        # post_disarm_list = self.log_list()
+        # if len(post_disarm_list) - len(instant_post_disarm_list) != 1:
+        #     raise NotAchievedException("Did not get exactly one more log")
+
+        # self.progress("If we re-arm during the HAL_LOGGER_ARM_PERSIST period it should rotate")
+
+    def test_onboard_logging(self):
+        if self.is_tracker():
+            return
+        self.onboard_logging_log_disarmed()
+        self.onboard_logging_not_log_disarmed()
+
+
+    def test_log_download_mavproxy(self, upload_logs=False):
         """Download latest log."""
-        self.wait_heartbeat()
+        filename = "MAVProxy-downloaded-log.BIN"
         self.mavproxy.send("module load log\n")
         self.mavproxy.expect("Loaded module log")
         self.mavproxy.send("log list\n")
@@ -1579,18 +1996,17 @@ class AutoTest(ABC):
         self.wait_heartbeat()
         self.mavproxy.send("set shownoise 0\n")
         self.mavproxy.send("log download latest %s\n" % filename)
-        self.mavproxy.expect("Finished downloading", timeout=timeout)
+        self.mavproxy.expect("Finished downloading", timeout=120)
         self.mavproxy.send("module unload log\n")
         self.mavproxy.expect("Unloaded module log")
-        self.drain_mav_unparsed()
-        self.wait_heartbeat()
-        self.wait_heartbeat()
-        if upload_logs and os.getenv("AUTOTEST_UPLOAD"):
+
+    def log_upload(self):
+        if len(self.fail_list) > 0 and os.getenv("AUTOTEST_UPLOAD"):
             # optionally upload logs to server so we can see travis failure logs
             import datetime
             import glob
             import subprocess
-            logdir = os.path.dirname(filename)
+            logdir = self.buildlogs_dirpath()
             datedir = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M")
             flist = glob.glob("logs/*.BIN")
             for e in ['BIN', 'bin', 'tlog']:
@@ -2130,7 +2546,8 @@ class AutoTest(ABC):
         while True:
             delta = self.get_sim_time_cached() - tstart
             if delta > timeout:
-                raise AutoTestTimeoutException("Failed to DISARM")
+                raise AutoTestTimeoutException("Failed to DISARM within %fs" %
+                                               (timeout,))
             self.wait_heartbeat()
             self.progress("Got heartbeat")
             if not self.mav.motors_armed():
@@ -2344,6 +2761,11 @@ class AutoTest(ABC):
     def get_parameter(self, name, retry=1, timeout=60):
         """Get parameters from vehicle."""
         for i in range(0, retry):
+            # we call get_parameter while the vehicle is rebooting.
+            # We need to read out the SITL binary's STDOUT or the
+            # process blocks writing to it.
+            if self.sitl is not None:
+                util.pexpect_drain(self.sitl)
             self.mavproxy.send("param fetch %s\n" % name)
             try:
                 self.mavproxy.expect("%s = ([-0-9.]*)\r\n" % (name,), timeout=timeout/retry)
@@ -2399,6 +2821,8 @@ class AutoTest(ABC):
             target_sysid = self.sysid_thismav()
         if target_compid is None:
             target_compid = 1
+
+        self.get_sim_time() # required for timeout in run_cmd_get_ack to work
 
         """Send a MAVLink command int."""
         self.mav.mav.command_int_send(target_sysid,
@@ -2475,6 +2899,7 @@ class AutoTest(ABC):
                 target_compid=None,
                 timeout=10,
                 quiet=False):
+        self.get_sim_time() # required for timeout in run_cmd_get_ack to work
         self.send_cmd(command,
                       p1,
                       p2,
@@ -2489,6 +2914,8 @@ class AutoTest(ABC):
         self.run_cmd_get_ack(command, want_result, timeout, quiet=quiet)
 
     def run_cmd_get_ack(self, command, want_result, timeout, quiet=False):
+        # note that the caller should ensure that this cached
+        # timestamp is reasonably up-to-date!
         tstart = self.get_sim_time_cached()
         while True:
             delta_time = self.get_sim_time_cached() - tstart
@@ -2824,6 +3251,7 @@ class AutoTest(ABC):
     #################################################
     def delay_sim_time(self, seconds_to_wait):
         """Wait some second in SITL time."""
+        self.drain_mav_unparsed()
         tstart = self.get_sim_time()
         tnow = tstart
         self.progress("Delaying %f seconds" % (seconds_to_wait,))
@@ -3198,6 +3626,7 @@ class AutoTest(ABC):
 
     def wait_ekf_flags(self, required_value, error_bits, timeout=30):
         self.progress("Waiting for EKF value %u" % required_value)
+        self.drain_mav_unparsed()
         last_print_time = 0
         tstart = self.get_sim_time()
         while timeout is None or self.get_sim_time_cached() < tstart + timeout:
@@ -4788,6 +5217,7 @@ switch value'''
                                                    (str(count), str(expected_count), len(seen_ids.keys())))
                 elif attempt_count != 0:
                     self.progress("Download failed; retrying")
+                    self.delay_sim_time(1)
                 self.drain_mav()
                 self.mav.mav.param_request_list_send(target_system, target_component)
                 attempt_count += 1
@@ -5165,15 +5595,29 @@ switch value'''
         self.wait_ready_to_arm()
 
         # test we get statustext strings.  This relies on ArduPilot
-        # emitting statustext strings when we fetch parameters.
-        self.mavproxy.send("param fetch\n")
+        # emitting statustext strings when we fetch parameters. (or,
+        # now, an updating-barometer statustext)
         tstart = self.get_sim_time_cached()
         old_data = None
         text = ""
+        sent_request = False
         while True:
             now = self.get_sim_time()
             if now - tstart > 60: # it can take a *long* time to get these messages down!
                 raise NotAchievedException("Did not get statustext in time")
+            if now - tstart > 30 and not sent_request:
+                # have to wait this long or our message gets squelched....
+                sent_request = True
+#                                self.mavproxy.send("param fetch\n")
+                self.run_cmd(mavutil.mavlink.MAV_CMD_PREFLIGHT_CALIBRATION,
+                             0, #p1
+                             0, #p2
+                             1, #p3, baro
+                             0, #p4
+                             0, #p5
+                             0, #p6
+                             0, #p7
+                )
             frsky.update()
             data = frsky.get_data(0x5000) # no timestamping on this data, so we can't catch legitimate repeats.
             if data is None:
@@ -5195,7 +5639,9 @@ switch value'''
                 if (x & 0x7f) == 0x00:
                     last = True
             if last:
-                m = re.match("Ardu(Plane|Copter|Rover|Tracker|Sub) V[345]", text)
+                # we used to do a 'param fetch' and expect this back, but the params-via-ftp thing broke it.
+#                m = re.match("Ardu(Plane|Copter|Rover|Tracker|Sub) V[345]", text)
+                m = re.match("Updating barometer calibration", text)
                 if m is not None:
                     want_sev = mavutil.mavlink.MAV_SEVERITY_INFO
                     if severity != want_sev:
@@ -5290,7 +5736,7 @@ switch value'''
         m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=1)
         if m is None:
             raise NotAchievedException("Did not receive GLOBAL_POSITION_INT")
-        gpi_abs_alt = int(m.alt / 1000) # mm -> m
+        gpi_abs_alt = int((m.alt+500) / 1000) # mm -> m
         tstart = self.get_sim_time_cached()
         while True:
             t2 = self.get_sim_time_cached()
@@ -5441,6 +5887,10 @@ switch value'''
             ("LoggerDocumentation",
              "Test Onboard Logging Generation",
              self.test_onboard_logging_generation),
+
+            ("Logging",
+             "Test Onboard Logging",
+             self.test_onboard_logging),
 
             ("GetCapabilities",
              "Get Capabilities",

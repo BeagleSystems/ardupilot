@@ -75,10 +75,14 @@ Aircraft::Aircraft(const char *frame_str) :
     enum ap_var_type ptype;
     ahrs_orientation = (AP_Int8 *)AP_Param::find("AHRS_ORIENTATION", &ptype);
 
+    // ahrs_orientation->get() returns ROTATION_NONE here, regardless of the actual value
     enum Rotation imu_rotation = ahrs_orientation?(enum Rotation)ahrs_orientation->get():ROTATION_NONE;
-    ahrs_rotation_inv.from_rotation(imu_rotation);
-    ahrs_rotation_inv.transpose();
     last_imu_rotation = imu_rotation;
+    // sitl is null if running example program
+    if (sitl) {
+        sitl->ahrs_rotation.from_rotation(imu_rotation);
+        sitl->ahrs_rotation_inv = sitl->ahrs_rotation.transposed();
+    }
 
     terrain = reinterpret_cast<AP_Terrain *>(AP_Param::find_object("TERRAIN_"));
 }
@@ -389,15 +393,31 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
 
     if (ahrs_orientation != nullptr) {
         enum Rotation imu_rotation = (enum Rotation)ahrs_orientation->get();
-
         if (imu_rotation != last_imu_rotation) {
-            ahrs_rotation_inv.from_rotation(imu_rotation);
-            ahrs_rotation_inv.transpose();
-            last_imu_rotation = imu_rotation;
+            // Surprisingly, Matrix3<T>::from_rotation(ROTATION_CUSTOM) is the identity matrix
+            // so we must deal with that here
+            if (imu_rotation == ROTATION_CUSTOM) {
+                if ((custom_roll == nullptr) || (custom_pitch == nullptr) || (custom_yaw == nullptr)) {
+                    enum ap_var_type ptype;
+                    custom_roll = (AP_Float *)AP_Param::find("AHRS_CUSTOM_ROLL", &ptype);
+                    custom_pitch = (AP_Float *)AP_Param::find("AHRS_CUSTOM_PIT", &ptype);
+                    custom_yaw = (AP_Float *)AP_Param::find("AHRS_CUSTOM_YAW", &ptype);
+                }
+                if ((custom_roll != nullptr) && (custom_pitch != nullptr) && (custom_yaw != nullptr)) {
+                    sitl->ahrs_rotation.from_euler(radians(*custom_roll), radians(*custom_pitch), radians(*custom_yaw));
+                    sitl->ahrs_rotation_inv = sitl->ahrs_rotation.transposed();
+                } else {
+                    AP_HAL::panic("could not find one or more of parameters AHRS_CUSTOM_ROLL/PITCH/YAW");
+                }
+            } else {
+                sitl->ahrs_rotation.from_rotation(imu_rotation);
+                sitl->ahrs_rotation_inv = sitl->ahrs_rotation.transposed();
+                last_imu_rotation = imu_rotation;
+            }
         }
         if (imu_rotation != ROTATION_NONE) {
             Matrix3f m = dcm;
-            m = m * ahrs_rotation_inv;
+            m = m * sitl->ahrs_rotation_inv;
 
             m.to_euler(&r, &p, &y);
             fdm.rollDeg  = degrees(r);
@@ -578,6 +598,9 @@ void Aircraft::update_dynamics(const Vector3f &rot_accel)
         }
         }
     }
+
+    // allow for changes in physics step
+    adjust_frame_time(constrain_float(sitl->loop_rate_hz, rate_hz-1, rate_hz+1));
 }
 
 /*

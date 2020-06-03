@@ -111,7 +111,7 @@ bool NavEKF3_core::getRangeBeaconDebug(uint8_t &ID, float &rng, float &innov, fl
 bool NavEKF3_core::getHeightControlLimit(float &height) const
 {
     // only ask for limiting if we are doing optical flow navigation
-    if (frontend->_fusionModeGPS == 3) {
+    if (frontend->_fusionModeGPS == 3 && (PV_AidingMode == AID_RELATIVE) && flowDataValid) {
         // If are doing optical flow nav, ensure the height above ground is within range finder limits after accounting for vehicle tilt and control errors
         const RangeFinder *_rng = AP::rangefinder();
         if (_rng == nullptr) {
@@ -347,7 +347,11 @@ bool NavEKF3_core::getLLH(struct Location &loc) const
                 // if no GPS fix, provide last known position before entering the mode
                 loc.lat = EKF_origin.lat;
                 loc.lng = EKF_origin.lng;
-                loc.offset(lastKnownPositionNE.x, lastKnownPositionNE.y);
+                if (PV_AidingMode == AID_NONE) {
+                    loc.offset(lastKnownPositionNE.x, lastKnownPositionNE.y);
+                } else {
+                    loc.offset(outputDataNew.position.x, outputDataNew.position.y);
+                }
                 return false;
             }
         }

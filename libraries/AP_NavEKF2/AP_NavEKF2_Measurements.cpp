@@ -585,7 +585,7 @@ void NavEKF2_core::readGpsData()
 
             if (gpsGoodToAlign && !have_table_earth_field) {
                 const Compass *compass = _ahrs->get_compass();
-                if (compass && compass->have_scale_factor(magSelectIndex)) {
+                if (compass && compass->have_scale_factor(magSelectIndex) && compass->auto_declination_enabled()) {
                     table_earth_field_ga = AP_Declination::get_earth_field_ga(gpsloc);
                     table_declination = radians(AP_Declination::get_declination(gpsloc.lat*1.0e-7,
                                                                                 gpsloc.lng*1.0e-7));
@@ -890,7 +890,7 @@ void NavEKF2_core::getTimingStatistics(struct ekf_timing &_timing)
     memset(&timing, 0, sizeof(timing));
 }
 
-void NavEKF2_core::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint32_t resetTime_ms)
+void NavEKF2_core::writeExtNavData(const Vector3f &pos, const Quaternion &quat, float posErr, float angErr, uint32_t timeStamp_ms, uint16_t delay_ms, uint32_t resetTime_ms)
 {
     // limit update rate to maximum allowed by sensor buffers and fusion process
     // don't try to write to buffer until the filter has been initialised
@@ -915,7 +915,7 @@ void NavEKF2_core::writeExtNavData(const Vector3f &pos, const Quaternion &quat, 
         extNavDataNew.posErr = frontend->_gpsHorizPosNoise;
     }
     extNavDataNew.angErr = angErr;
-    timeStamp_ms = timeStamp_ms - frontend->_extnavDelay_ms;
+    timeStamp_ms = timeStamp_ms - delay_ms;
     // Correct for the average intersampling delay due to the filter updaterate
     timeStamp_ms -= localFilterTimeStep_ms/2;
     // Prevent time delay exceeding age of oldest IMU data in the buffer
@@ -1014,4 +1014,23 @@ void NavEKF2_core::learnInactiveBiases(void)
 void NavEKF2_core::writeDefaultAirSpeed(float airspeed)
 {
     defaultAirSpeed = airspeed;
+}
+
+void NavEKF2_core::writeExtNavVelData(const Vector3f &vel, float err, uint32_t timeStamp_ms, uint16_t delay_ms)
+{
+    if ((timeStamp_ms - extNavVelMeasTime_ms) < 70) {
+        return;
+    }
+
+    extNavVelMeasTime_ms = timeStamp_ms;
+    useExtNavVel = true;
+    extNavVelNew.vel = vel;
+    extNavVelNew.err = err;
+    timeStamp_ms = timeStamp_ms - delay_ms;
+    // Correct for the average intersampling delay due to the filter updaterate
+    timeStamp_ms -= localFilterTimeStep_ms/2;
+    // Prevent time delay exceeding age of oldest IMU data in the buffer
+    timeStamp_ms = MAX(timeStamp_ms,imuDataDelayed.time_ms);
+    extNavVelNew.time_ms = timeStamp_ms;
+    storedExtNavVel.push(extNavVelNew);
 }

@@ -181,14 +181,14 @@ class AutoTestQuadPlane(AutoTest):
         self.wait_altitude(-5, 1, relative=True, timeout=60)
         self.wait_disarmed()
 
-    def fly_home_land_and_disarm(self):
+    def fly_home_land_and_disarm(self, timeout=30):
         self.set_parameter("LAND_TYPE", 0)
         filename = "flaps.txt"
         self.progress("Using %s to fly home" % filename)
         self.load_mission(filename)
         self.change_mode("AUTO")
         self.mavproxy.send('wp set 7\n')
-        self.wait_disarmed()
+        self.wait_disarmed(timeout=timeout)
 
     def wait_level_flight(self, accuracy=5, timeout=30):
         """Wait for level flight."""
@@ -249,8 +249,11 @@ class AutoTestQuadPlane(AutoTest):
         psd = self.mavfft_fttd(1, 0, tstart * 1.0e6, tend * 1.0e6)
 
         # batch sampler defaults give 1024 fft and sample rate of 1kz so roughly 1hz/bin
-        freq = psd["F"][numpy.argmax(psd["X"][minhz:maxhz]) + minhz] * (1000. / 1024.)
-        peakdb = numpy.amax(psd["X"][minhz:maxhz])
+        scale = 1000. / 1024.
+        sminhz = int(minhz * scale)
+        smaxhz = int(maxhz * scale)
+        freq = psd["F"][numpy.argmax(psd["X"][sminhz:smaxhz]) + sminhz]
+        peakdb = numpy.amax(psd["X"][sminhz:smaxhz])
         if peakdb < dblevel or (peakhz is not None and abs(freq - peakhz) / peakhz > 0.05):
             raise NotAchievedException("Did not detect a motor peak, found %fHz at %fdB" % (freq, peakdb))
         else:
@@ -262,6 +265,7 @@ class AutoTestQuadPlane(AutoTest):
         # accuracy is determined by sample rate and fft length, given our use of quinn we could probably use half of this
         freqDelta = 1000. / fftLength
         pkAvg = freq
+        freqs = []
 
         while True:
             m = mlog.recv_match(
@@ -270,8 +274,10 @@ class AutoTestQuadPlane(AutoTest):
                 condition="FTN1.TimeUS>%u and FTN1.TimeUS<%u" % (tstart * 1.0e6, tend * 1.0e6))
             if m is None:
                 break
-            pkAvg = pkAvg + (0.1 * (m.PkAvg - pkAvg))
+            freqs.append(m.PkAvg)
+
         # peak within resolution of FFT length
+        pkAvg = numpy.median(numpy.asarray(freqs))
         if abs(pkAvg - freq) > freqDelta:
             raise NotAchievedException("FFT did not detect a motor peak at %f, found %f, wanted %f" % (dblevel, pkAvg, freq))
 
@@ -350,7 +356,7 @@ class AutoTestQuadPlane(AutoTest):
             self.do_RTL()
             psd = self.mavfft_fttd(1, 0, tstart * 1.0e6, tend * 1.0e6)
             freq = psd["F"][numpy.argmax(psd["X"][ignore_bins:]) + ignore_bins]
-            if numpy.amax(psd["X"][ignore_bins:]) < -15:
+            if numpy.amax(psd["X"][ignore_bins:]) < -10:
                 self.progress("Did not detect a motor peak, found %f at %f dB" % (freq, numpy.amax(psd["X"][ignore_bins:])))
             else:
                 raise NotAchievedException("Detected motor peak at %f Hz" % (freq))
@@ -400,9 +406,54 @@ class AutoTestQuadPlane(AutoTest):
             "CPUFailsafe": "servo channel values not scaled like ArduPlane",
         }
 
+    def test_pilot_yaw(self):
+        self.takeoff(10, mode="QLOITER")
+        self.set_parameter("STICK_MIXING", 0)
+        self.set_rc(4, 1700)
+        for mode in "QLOITER", "QHOVER":
+            self.wait_heading(45)
+            self.wait_heading(90)
+            self.wait_heading(180)
+            self.wait_heading(275)
+        self.set_rc(4, 1500)
+        self.do_RTL()
+
     def CPUFailsafe(self):
         '''In lockup Plane should copy RC inputs to RC outputs'''
         self.plane_CPUFailsafe()
+
+    def test_qassist(self):
+        # find a motor peak
+        self.takeoff(10, mode="QHOVER")
+        self.set_rc(3, 1800)
+        self.change_mode("FBWA")
+        thr_min_pwm = self.get_parameter("Q_THR_MIN_PWM")
+        self.progress("Waiting for motors to stop (transition completion)")
+        self.wait_servo_channel_value(5,
+                                      thr_min_pwm,
+                                      timeout=30,
+                                      comparator=operator.eq)
+        self.delay_sim_time(5)
+        self.wait_servo_channel_value(5,
+                                      thr_min_pwm,
+                                      timeout=30,
+                                      comparator=operator.eq)
+        self.progress("Stopping forward motor to kill airspeed below limit")
+        self.set_rc(3, 1000)
+        self.progress("Waiting for qassist to kick in")
+        self.wait_servo_channel_value(5, 1400, timeout=30, comparator=operator.gt)
+        self.progress("Move forward again, check qassist stops")
+        self.set_rc(3, 1800)
+        self.progress("Checking qassist stops")
+        self.wait_servo_channel_value(5,
+                                      thr_min_pwm,
+                                      timeout=30,
+                                      comparator=operator.eq)
+        self.set_rc(3, 1500)
+        self.change_mode("RTL")
+        self.delay_sim_time(20)
+        self.change_mode("QRTL")
+        self.wait_disarmed(timeout=180)
 
     def tests(self):
         '''return list of all tests'''
@@ -411,12 +462,24 @@ class AutoTestQuadPlane(AutoTest):
         ret.extend([
             ("TestMotorMask", "Test output_motor_mask", self.test_motor_mask),
 
+            ("PilotYaw",
+             "Test pilot yaw in various modes",
+             self.test_pilot_yaw),
+
             ("ParameterChecks",
              "Test Arming Parameter Checks",
              self.test_parameter_checks),
 
+            ("TestLogDownload",
+             "Test Onboard Log Download",
+             self.test_log_download),
+
             ("Mission", "Dalby Mission",
              lambda: self.fly_mission("Dalby-OBC2016.txt", "Dalby-OBC2016-fence.txt")),
+
+            ("QAssist",
+             "QuadPlane Assist tests",
+             self.test_qassist),
 
             ("GyroFFT", "Fly Gyro FFT",
              self.fly_gyro_fft)

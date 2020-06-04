@@ -133,3 +133,16 @@ for reviewing patches on their specific area.  See also the list of developers w
   - ***Subsystem***: Marvelmind
 - [Samuel Tabor](https://github.com/samuelctabor):
   - ***Subsystem***: Soaring/Gliding
+
+
+
+## How to sync with official ardupilot repo
+
+```
+git remote -v
+git remote add upstream https://github.com/ardupilot/ardupilot.git
+git fetch upstream
+git checkout master
+git merge upstream/master
+git push origin master
+```

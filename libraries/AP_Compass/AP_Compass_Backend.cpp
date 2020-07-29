@@ -52,7 +52,10 @@ void AP_Compass_Backend::publish_raw_field(const Vector3f &mag, uint8_t instance
     // sensor rate. We want them to consume only the filtered fields
     state.last_update_ms = AP_HAL::millis();
 #if COMPASS_CAL_ENABLED
-    _compass._calibrator[_compass._get_priority(Compass::StateIndex(instance))].new_sample(mag);
+    auto& cal = _compass._calibrator[_compass._get_priority(Compass::StateIndex(instance))];
+    if (cal != nullptr) {
+        cal->new_sample(mag);
+    }
 #endif
 }
 
@@ -202,7 +205,6 @@ void AP_Compass_Backend::set_dev_id(uint8_t instance, uint32_t dev_id)
 {
     _compass._state[Compass::StateIndex(instance)].dev_id.set_and_notify(dev_id);
     _compass._state[Compass::StateIndex(instance)].detected_dev_id = dev_id;
-    _compass._state[Compass::StateIndex(instance)].expected_dev_id = dev_id;
 }
 
 /*

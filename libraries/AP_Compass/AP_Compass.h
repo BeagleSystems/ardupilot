@@ -9,7 +9,6 @@
 #include <AP_Param/AP_Param.h>
 #include <GCS_MAVLink/GCS_MAVLink.h>
 
-#include "CompassCalibrator.h"
 #include "AP_Compass_Backend.h"
 #include "Compass_PerMotor.h"
 #include <AP_Common/TSIndex.h>
@@ -62,6 +61,8 @@
 #define COMPASS_MAX_BACKEND   HAL_COMPASS_MAX_SENSORS
 
 #define MAX_CONNECTED_MAGS (COMPASS_MAX_UNREG_DEV+COMPASS_MAX_INSTANCES)
+
+#include "CompassCalibrator.h"
 
 class CompassLearn;
 
@@ -167,8 +168,8 @@ public:
 
     void cancel_calibration_all();
 
-    bool compass_cal_requires_reboot() const { return _cal_complete_requires_reboot; }
-    bool is_calibrating() const;
+    bool compass_cal_requires_reboot() const { return _cal_requires_reboot; }
+    bool is_calibrating();
 
     // indicate which bit in LOG_BITMASK indicates we should log compass readings
     void set_log_bit(uint32_t log_bit) { _log_bit = log_bit; }
@@ -367,14 +368,17 @@ private:
     void _detect_backends(void);
 
     // compass cal
+    void _update_calibration_trampoline();
     bool _accept_calibration(uint8_t i);
     bool _accept_calibration_mask(uint8_t mask);
     void _cancel_calibration(uint8_t i);
     void _cancel_calibration_mask(uint8_t mask);
-    uint8_t _get_cal_mask() const;
+    uint8_t _get_cal_mask();
     bool _start_calibration(uint8_t i, bool retry=false, float delay_sec=0.0f);
     bool _start_calibration_mask(uint8_t mask, bool retry=false, bool autosave=false, float delay_sec=0.0f, bool autoreboot=false);
     bool _auto_reboot() { return _compass_cal_autoreboot; }
+    Priority next_cal_progress_idx[MAVLINK_COMM_NUM_BUFFERS];
+    Priority next_cal_report_idx[MAVLINK_COMM_NUM_BUFFERS];
 
     // see if we already have probed a i2c driver by bus number and address
     bool _have_i2c_driver(uint8_t bus_num, uint8_t address) const;
@@ -393,7 +397,7 @@ private:
 
     //autoreboot after compass calibration
     bool _compass_cal_autoreboot;
-    bool _cal_complete_requires_reboot;
+    bool _cal_requires_reboot;
     bool _cal_has_run;
 
     // enum of drivers for COMPASS_TYPEMASK
@@ -485,7 +489,9 @@ private:
         // saved to eeprom when offsets are saved allowing ram &
         // eeprom values to be compared as consistency check
         AP_Int32    dev_id;
+        // Initialised when compass is detected
         int32_t detected_dev_id;
+        // Initialised at boot from saved devid
         int32_t expected_dev_id;
 
         // factors multiplied by throttle and added to compass outputs
@@ -529,6 +535,14 @@ private:
     // load them as they come up the first time
     Priority _update_priority_list(int32_t dev_id);
     
+    // method to check if the mag with the devid 
+    // is a replacement mag
+    bool is_replacement_mag(uint32_t dev_id);
+
+    //remove the devid from unreg compass list
+    void remove_unreg_dev_id(uint32_t devid);
+
+    void _reset_compass_id();
     //Create Arrays to be accessible by Priority only
     RestrictIDTypeArray<AP_Int8, COMPASS_MAX_INSTANCES, Priority> _use_for_yaw;
 #if COMPASS_MAX_INSTANCES > 1
@@ -545,7 +559,7 @@ private:
     AP_Int16 _options;
 
 #if COMPASS_CAL_ENABLED
-    RestrictIDTypeArray<CompassCalibrator, COMPASS_MAX_INSTANCES, Priority> _calibrator;
+    RestrictIDTypeArray<CompassCalibrator*, COMPASS_MAX_INSTANCES, Priority> _calibrator;
 #endif
 
 #if COMPASS_MOT_ENABLED
@@ -564,6 +578,7 @@ private:
 #if COMPASS_MAX_UNREG_DEV
     // Put extra dev ids detected
     AP_Int32 extra_dev_id[COMPASS_MAX_UNREG_DEV];
+    uint32_t _previously_unreg_mag[COMPASS_MAX_UNREG_DEV];
 #endif
 
     AP_Int8 _filter_range;
@@ -578,6 +593,8 @@ private:
     ///
     void try_set_initial_location();
     bool _initial_location_set;
+
+    bool _cal_thread_started;
 };
 
 namespace AP {

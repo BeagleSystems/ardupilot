@@ -451,6 +451,9 @@ void Plane::update_navigation()
             mission.update();
         }
         break;
+
+    case Mode::Number::SMART_RTL:
+        break;
             
     case Mode::Number::RTL:
         if (quadplane.available() && quadplane.rtl_mode == 1 &&

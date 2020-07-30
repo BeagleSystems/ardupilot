@@ -57,6 +57,7 @@ void Plane::failsafe_short_on_event(enum failsafe_state fstype, ModeReason reaso
     case Mode::Number::CIRCLE:
     case Mode::Number::TAKEOFF:
     case Mode::Number::RTL:
+    case Mode::Number::SMART_RTL:
     case Mode::Number::QLAND:
     case Mode::Number::QRTL:
     case Mode::Number::INITIALISING:
@@ -122,6 +123,7 @@ void Plane::failsafe_long_on_event(enum failsafe_state fstype, ModeReason reason
         break;
 
     case Mode::Number::RTL:
+    case Mode::Number::SMART_RTL:
     case Mode::Number::QLAND:
     case Mode::Number::QRTL:
     case Mode::Number::TAKEOFF:
@@ -188,6 +190,19 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
             }
             break;
 
+        case Failsafe_Action_Smart_RTL:
+            if (flight_stage != AP_Vehicle::FixedWing::FLIGHT_LAND && control_mode != &mode_qland && !quadplane.in_vtol_land_sequence()) {
+                // never stop a landing if we were already committed
+                if (g.rtl_autoland == 2 && plane.mission.is_best_land_sequence()) {
+                    // continue mission as it will reach a landing in less distance
+                    plane.mission.set_in_landing_sequence_flag(true);
+                    break;
+                }
+                set_mode(mode_srtl, ModeReason::BATTERY_FAILSAFE);
+                aparm.throttle_cruise.load();
+            }
+            break;
+
         case Failsafe_Action_Terminate:
 #if ADVANCED_FAILSAFE == ENABLED
             char battery_type_str[17];
@@ -202,6 +217,10 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
 #if PARACHUTE == ENABLED
             parachute_release();
 #endif
+            break;
+
+        case Failsafe_Action_Loiter:
+            // should not be used when battery warning
             break;
 
         case Failsafe_Action_None:

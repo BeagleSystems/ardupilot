@@ -329,7 +329,8 @@ public:
     enum mission_state {
         MISSION_STOPPED=0,
         MISSION_RUNNING=1,
-        MISSION_COMPLETE=2
+        MISSION_COMPLETE=2,
+        MISSION_RUNNING_REWIND=3,
     };
 
     ///
@@ -384,6 +385,10 @@ public:
     /// update - ensures the command queues are loaded with the next command and calls main programs command_init and command_verify functions to progress the mission
     ///     should be called at 10hz or higher
     void update();
+
+    /// rewind - ensures the command queues are loaded with the prev command and calls main programs command_init and command_verify functions to progress the mission
+    ///     should be called at 10hz or higher, for Smart RTL mode to fly back to HOME as how it went so far
+    void rewind();
 
     ///
     /// public command methods
@@ -600,10 +605,22 @@ private:
     //      returns true if command is advanced, false if failed (i.e. mission completed)
     bool advance_current_nav_cmd(uint16_t starting_index = 0);
 
+    /// retreat_current_nav_cmd - moves current nav command backward
+    //      starting_index is used to set the index from which searching will begin, leave as 0 to search from the current navigation target
+    ///     do command will also be loaded
+    ///     accounts for do-jump commands
+    //      returns true if command is retreated, false if failed (i.e. already back to the first waypoint)
+    bool retreat_current_nav_cmd(uint16_t starting_index = 0);
+
     /// advance_current_do_cmd - moves current do command forward
     ///     accounts for do-jump commands
     ///     returns true if successfully advanced (can it ever be unsuccessful?)
     void advance_current_do_cmd();
+
+    /// retreat_current_do_cmd - moves current do command backward
+    ///     accounts for do-jump commands
+    ///     returns true if successfully retreated (can it ever be unsuccessful?)
+    void retreat_current_do_cmd();
 
     /// get_next_cmd - gets next command found at or after start_index
     ///     returns true if found, false if not found (i.e. mission complete)

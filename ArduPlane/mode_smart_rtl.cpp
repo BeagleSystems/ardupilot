@@ -1,6 +1,16 @@
 #include "mode.h"
 #include "Plane.h"
 
+/*
+// Smart RTL is designed for the scenario which an unexpected failsafe happends during an AUTO mission,
+// Normal RTL will directly fly to nearest RALLY point or HOME position.
+// Problems are:
+// 1. if there is a GCS loss caused failsafe, we dont know which RALLY point the drone will go to, only guess.
+// 2. if there is obstacle high enough on the way between current location and RALLY/HOME position, the drone will crash.
+// 3. if there is restricted area on the way between, we will break the rule of non-fly zone.
+// The idea of smart RTL is if drone cleared any of way points from AUTO mission, it just need to fly back exactly as how it went there.
+*/
+
 bool ModeSmartRTL::_enter()
 {
     plane.throttle_allows_nudging = true;

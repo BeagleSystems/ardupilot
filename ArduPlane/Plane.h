@@ -461,6 +461,9 @@ private:
         // time stamp of when we start flying while in auto mode in milliseconds
         uint32_t started_flying_in_auto_ms;
 
+        // time stamp of when we start flying while in smart RTL mode in milliseconds
+        uint32_t started_flying_in_srtl_ms;
+
         // barometric altitude at start of takeoff
         float baro_takeoff_alt;
 
@@ -1089,7 +1092,9 @@ private:
         Failsafe_Action_Land      = 2,
         Failsafe_Action_Terminate = 3,
         Failsafe_Action_QLand     = 4,
-        Failsafe_Action_Parachute = 5
+        Failsafe_Action_Parachute = 5,
+        Failsafe_Action_Smart_RTL = 6,
+        Failsafe_Action_Loiter    = 7
     };
 
     // list of priorities, highest priority first

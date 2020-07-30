@@ -144,6 +144,7 @@ public:
     friend class ModeAutoTune;
     friend class ModeAuto;
     friend class ModeRTL;
+    friend class ModeSmartRTL;
     friend class ModeLoiter;
     friend class ModeAvoidADSB;
     friend class ModeGuided;
@@ -262,6 +263,7 @@ private:
     ModeAutoTune mode_autotune;
     ModeAuto mode_auto;
     ModeRTL mode_rtl;
+    ModeSmartRTL mode_srtl;
     ModeLoiter mode_loiter;
     ModeAvoidADSB mode_avoidADSB;
     ModeGuided mode_guided;

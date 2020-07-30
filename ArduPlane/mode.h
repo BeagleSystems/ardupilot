@@ -39,6 +39,7 @@ public:
         QRTL          = 21,
         QAUTOTUNE     = 22,
         QACRO         = 23,
+        SMART_RTL     = 24,
     };
 
     // Constructor
@@ -209,6 +210,22 @@ public:
     Number mode_number() const override { return Number::RTL; }
     const char *name() const override { return "RTL"; }
     const char *name4() const override { return "RTL "; }
+
+    // methods that affect movement of the vehicle in this mode
+    void update() override;
+
+protected:
+
+    bool _enter() override;
+};
+
+class ModeSmartRTL : public Mode
+{
+public:
+
+    Number mode_number() const override { return Number::SMART_RTL; }
+    const char *name() const override { return "SMARTRTL"; }
+    const char *name4() const override { return "SRTL"; }
 
     // methods that affect movement of the vehicle in this mode
     void update() override;

@@ -731,6 +731,7 @@ bool Plane::get_target_location(Location& target_loc)
 {
     switch (control_mode->mode_number()) {
     case Mode::Number::RTL:
+    case Mode::Number::SMART_RTL:
     case Mode::Number::AVOID_ADSB:
     case Mode::Number::GUIDED:
     case Mode::Number::AUTO:

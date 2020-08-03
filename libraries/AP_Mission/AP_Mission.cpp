@@ -301,7 +301,7 @@ void AP_Mission::rewind()
     // check if we have an active nav command
     if (!_flags.nav_cmd_loaded || _nav_cmd.index == AP_MISSION_CMD_INDEX_NONE) {
         // rewind in mission if no active nav command
-        if (!advance_current_nav_cmd()) {
+        if (!retreat_current_nav_cmd()) {
             // failure to advance nav command means mission has completed
             complete();
             return;
@@ -312,22 +312,11 @@ void AP_Mission::rewind()
             // market _nav_cmd as complete (it will be started on the next iteration)
             _flags.nav_cmd_loaded = false;
             // immediately advance to the next mission command
-            if (!advance_current_nav_cmd()) {
+            if (!retreat_current_nav_cmd()) {
                 // failure to advance nav command means mission has completed
                 complete();
                 return;
             }
-        }
-    }
-
-    // check if we have an active do command
-    if (!_flags.do_cmd_loaded) {
-        advance_current_do_cmd();
-    } else {
-        // check the active do command
-        if (verify_command(_do_cmd)) {
-            // mark _do_cmd as complete
-            _flags.do_cmd_loaded = false;
         }
     }
 }
@@ -1836,38 +1825,6 @@ bool AP_Mission::retreat_current_nav_cmd(uint16_t starting_index)
 /// advance_current_do_cmd - moves current do command forward
 ///     accounts for do-jump commands
 void AP_Mission::advance_current_do_cmd()
-{
-    // exit immediately if we're not running or we've completed all possible "do" commands
-    if (_flags.state != MISSION_RUNNING || _flags.do_cmd_all_done) {
-        return;
-    }
-
-    // get starting point for search
-    uint16_t cmd_index = _do_cmd.index;
-    if (cmd_index == AP_MISSION_CMD_INDEX_NONE) {
-        cmd_index = AP_MISSION_FIRST_REAL_COMMAND;
-    } else {
-        // start from one position past the current do command
-        cmd_index = _do_cmd.index + 1;
-    }
-
-    // find next do command
-    Mission_Command cmd;
-    if (!get_next_do_cmd(cmd_index, cmd)) {
-        // set flag to stop unnecessarily searching for do commands
-        _flags.do_cmd_all_done = true;
-        return;
-    }
-
-    // set current do command and start it
-    _do_cmd = cmd;
-    _flags.do_cmd_loaded = true;
-    start_command(_do_cmd);
-}
-
-/// retreat_current_do_cmd - moves current do command backward
-///     accounts for do-jump commands
-void AP_Mission::retreat_current_do_cmd()
 {
     // exit immediately if we're not running or we've completed all possible "do" commands
     if (_flags.state != MISSION_RUNNING || _flags.do_cmd_all_done) {

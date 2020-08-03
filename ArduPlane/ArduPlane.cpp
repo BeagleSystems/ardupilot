@@ -124,7 +124,7 @@ void Plane::get_scheduler_tasks(const AP_Scheduler::Task *&tasks,
     log_bit = MASK_LOG_PM;
 }
 
-constexpr int8_t Plane::_failsafe_priorities[7];
+constexpr int8_t Plane::_failsafe_priorities[9];
 
 // update AHRS system
 void Plane::ahrs_update()
@@ -453,6 +453,9 @@ void Plane::update_navigation()
         break;
 
     case Mode::Number::SMART_RTL:
+        if (ahrs.home_is_set()) {
+            mission.rewind();
+        }
         break;
             
     case Mode::Number::RTL:

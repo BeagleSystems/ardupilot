@@ -41,7 +41,8 @@
 #define AP_MISSION_MASK_DIST_TO_LAND_CALC   (1<<1)  // Allow distance to best landing calculation to be run on failsafe
 #define AP_MISSION_MASK_CONTINUE_AFTER_LAND (1<<2)  // Allow mission to continue after land
 
-#define AP_MISSION_MAX_WP_HISTORY           7       // The maximum number of previous wp commands that will be stored from the active missions history
+#define AP_MISSION_MAX_WP_HISTORY           50      // The maximum number of previous wp commands that will be stored from the active missions history
+                                                    // change to 50 for Smart RTL
 #define LAST_WP_PASSED (AP_MISSION_MAX_WP_HISTORY-2)
 
 /// @class    AP_Mission
@@ -330,7 +331,7 @@ public:
         MISSION_STOPPED=0,
         MISSION_RUNNING=1,
         MISSION_COMPLETE=2,
-        MISSION_RUNNING_REWIND=3,
+        // MISSION_RUNNING_REWIND=3,
     };
 
     ///
@@ -610,17 +611,13 @@ private:
     ///     do command will also be loaded
     ///     accounts for do-jump commands
     //      returns true if command is retreated, false if failed (i.e. already back to the first waypoint)
+    // new
     bool retreat_current_nav_cmd(uint16_t starting_index = 0);
 
     /// advance_current_do_cmd - moves current do command forward
     ///     accounts for do-jump commands
     ///     returns true if successfully advanced (can it ever be unsuccessful?)
     void advance_current_do_cmd();
-
-    /// retreat_current_do_cmd - moves current do command backward
-    ///     accounts for do-jump commands
-    ///     returns true if successfully retreated (can it ever be unsuccessful?)
-    void retreat_current_do_cmd();
 
     /// get_next_cmd - gets next command found at or after start_index
     ///     returns true if found, false if not found (i.e. mission complete)

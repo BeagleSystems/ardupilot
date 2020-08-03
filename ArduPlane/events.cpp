@@ -190,6 +190,7 @@ void Plane::handle_battery_failsafe(const char *type_str, const int8_t action)
             }
             break;
 
+        // should not do smart RTL when battery warning
         case Failsafe_Action_Smart_RTL:
             if (flight_stage != AP_Vehicle::FixedWing::FLIGHT_LAND && control_mode != &mode_qland && !quadplane.in_vtol_land_sequence()) {
                 // never stop a landing if we were already committed

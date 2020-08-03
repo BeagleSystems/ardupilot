@@ -1104,6 +1104,8 @@ private:
                                                       Failsafe_Action_QLand,
                                                       Failsafe_Action_Land,
                                                       Failsafe_Action_RTL,
+                                                      Failsafe_Action_Smart_RTL,
+                                                      Failsafe_Action_Loiter,
                                                       Failsafe_Action_None,
                                                       -1 // the priority list must end with a sentinel of -1
                                                      };

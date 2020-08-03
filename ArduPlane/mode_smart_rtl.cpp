@@ -13,12 +13,14 @@
 
 bool ModeSmartRTL::_enter()
 {
-    plane.throttle_allows_nudging = true;
-    plane.auto_throttle_mode = true;
-    plane.auto_navigation_mode = true;
-    plane.prev_WP_loc = plane.current_loc;
-    plane.do_RTL(plane.get_RTL_altitude());
-    plane.rtl.done_climb = false;
+    if(plane.mission.state() != AP_Mission::MISSION_STOPPED)
+    {
+        // if no waypoints in history or not auto mission, go normal rtl
+        plane.set_mode(plane.mode_rtl, ModeReason::SMART_RTL_SWITCHING_TO_RTL);
+    }
+    
+
+    // else set mission state to rewind
 
     return true;
 }

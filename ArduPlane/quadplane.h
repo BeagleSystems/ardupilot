@@ -27,6 +27,7 @@ public:
 
     friend class Mode;
     friend class ModeAuto;
+    friend class ModeSmartRTL;
     friend class ModeAvoidADSB;
     friend class ModeGuided;
     friend class ModeQHover;

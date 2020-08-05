@@ -331,7 +331,6 @@ public:
         MISSION_STOPPED=0,
         MISSION_RUNNING=1,
         MISSION_COMPLETE=2,
-        // MISSION_RUNNING_REWIND=3,
     };
 
     ///
@@ -361,6 +360,8 @@ public:
     ///     To-Do: should we validate the mission first and return true/false?
     void start();
 
+    void resume_fly_back();
+
     /// stop - stops mission execution.  subsequent calls to update() will have no effect until the mission is started or resumed
     void stop();
 
@@ -370,6 +371,8 @@ public:
 
     /// start_or_resume - if MIS_AUTORESTART=0 this will call resume(), otherwise it will call start()
     void start_or_resume();
+
+    void resume_flyback();
 
     /// check mission starts with a takeoff command
     bool starts_with_takeoff_cmd();
@@ -389,7 +392,7 @@ public:
 
     /// rewind - ensures the command queues are loaded with the prev command and calls main programs command_init and command_verify functions to progress the mission
     ///     should be called at 10hz or higher, for Smart RTL mode to fly back to HOME as how it went so far
-    void rewind();
+    void flyback();
 
     ///
     /// public command methods
@@ -624,6 +627,13 @@ private:
     ///     accounts for do_jump commands
     ///     increment_jump_num_times_if_found should be set to true if advancing the active navigation command
     bool get_next_cmd(uint16_t start_index, Mission_Command& cmd, bool increment_jump_num_times_if_found, bool send_gcs_msg = true);
+
+    /// get_next_cmd - gets next command found at or after start_index
+    ///     returns true if found, false if not found (i.e. mission complete)
+    ///     accounts for do_jump commands
+    ///     increment_jump_num_times_if_found should be set to true if advancing the active navigation command
+    bool get_prev_cmd(uint16_t start_index, Mission_Command& cmd, bool increment_jump_num_times_if_found, bool send_gcs_msg = true);
+
 
     /// get_next_do_cmd - gets next "do" or "conditional" command after start_index
     ///     returns true if found, false if not found

@@ -454,7 +454,7 @@ void Plane::update_navigation()
 
     case Mode::Number::SMART_RTL:
         if (ahrs.home_is_set()) {
-            mission.rewind();
+            mission.flyback();
         }
         break;
             

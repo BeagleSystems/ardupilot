@@ -925,7 +925,7 @@ void Plane::do_set_home(const AP_Mission::Mission_Command& cmd)
 //      we double check that the flight mode is AUTO to avoid the possibility of ap-mission triggering actions while we're not in AUTO mode
 bool Plane::start_command_callback(const AP_Mission::Mission_Command &cmd)
 {
-    if (control_mode == &mode_auto) {
+    if ((control_mode == &mode_auto) || (control_mode == &mode_srtl)) {
         return start_command(cmd);
     }
     return true;
@@ -935,7 +935,7 @@ bool Plane::start_command_callback(const AP_Mission::Mission_Command &cmd)
 //      we double check that the flight mode is AUTO to avoid the possibility of ap-mission triggering actions while we're not in AUTO mode
 bool Plane::verify_command_callback(const AP_Mission::Mission_Command& cmd)
 {
-    if (control_mode == &mode_auto) {
+    if ((control_mode == &mode_auto) || (control_mode == &mode_srtl)) {
         bool cmd_complete = verify_command(cmd);
 
         // send message to GCS
@@ -952,7 +952,7 @@ bool Plane::verify_command_callback(const AP_Mission::Mission_Command& cmd)
 //      we double check that the flight mode is AUTO to avoid the possibility of ap-mission triggering actions while we're not in AUTO mode
 void Plane::exit_mission_callback()
 {
-    if (control_mode == &mode_auto) {
+    if ((control_mode == &mode_auto) || (control_mode == &mode_srtl)) {
         set_mode(mode_rtl, ModeReason::MISSION_END);
         gcs().send_text(MAV_SEVERITY_INFO, "Mission complete, changing mode to RTL");
     }

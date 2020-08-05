@@ -12,96 +12,81 @@
 */
 
 bool ModeSmartRTL::_enter()
-{
-    if(plane.mission.state() != AP_Mission::MISSION_STOPPED)
+{      
+    // check mission state to find out if smart RTL is needed
+    // if current nav cmd index in list is not 0
+    uint16_t cur_idx = plane.mission.get_current_nav_index();
+    gcs().send_text(MAV_SEVERITY_INFO, "Enter SmartRTL mode with wp idx=%u", static_cast<unsigned>(cur_idx));
+
+    if(plane.mission.get_current_nav_index() != 0)
     {
-        // if no waypoints in history or not auto mission, go normal rtl
+        plane.throttle_allows_nudging = true;
+        plane.auto_throttle_mode = true;
+        plane.auto_navigation_mode = true;
+
+        plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
+        // start or resume the mission, based on MIS_AUTORESET
+        //uint16_t cur_idx = plane.mission.get_current_nav_index();
+        plane.mission.set_force_resume(true);
+        //plane.mission.start_or_resume();
+
+        if (hal.util->was_watchdog_armed()) {
+            if (hal.util->persistent_data.waypoint_num != 0) {
+                gcs().send_text(MAV_SEVERITY_INFO, "Watchdog: resume WP %u", hal.util->persistent_data.waypoint_num);
+                plane.mission.set_current_cmd(hal.util->persistent_data.waypoint_num);
+                hal.util->persistent_data.waypoint_num = 0;
+            }
+        }
+
+    #if SOARING_ENABLED == ENABLED
+        plane.g2.soaring_controller.init_cruising();
+    #endif
+        // ready to do smart RTL
+        // plane.throttle_allows_nudging = true;
+        // plane.auto_throttle_mode = true;
+        // plane.auto_navigation_mode = true;
+        // plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
+
+        // //set mission state to flyback
+        // uint16_t cur_idx = plane.mission.get_current_nav_index();
+        // gcs().send_text(MAV_SEVERITY_INFO, "Enter SmartRTL mode with wp idx=%u", static_cast<unsigned>(cur_idx));
+        // //waypoints rewind will be handled in Plane::update_navigation() in task SCHED_TASK(navigate,10,150)
+        // // plane.mission.set_current_cmd(cur_idx);
+        // plane.mission.start_fly_back(cur_idx);
+    }
+    else // go back to normal RTL
+    {
         plane.set_mode(plane.mode_rtl, ModeReason::SMART_RTL_SWITCHING_TO_RTL);
     }
-    
-
-    // else set mission state to rewind
 
     return true;
 }
 
-void ModeSmartRTL::update()
-{
-    plane.calc_nav_roll();
-    plane.calc_nav_pitch();
-    plane.calc_throttle();
-
-    if (plane.g2.rtl_climb_min > 0) {
-        /*
-          when RTL first starts limit bank angle to LEVEL_ROLL_LIMIT
-          until we have climbed by RTL_CLIMB_MIN meters
-         */
-        if (!plane.rtl.done_climb && (plane.current_loc.alt - plane.prev_WP_loc.alt)*0.01 > plane.g2.rtl_climb_min) {
-            plane.rtl.done_climb = true;
-        }
-        if (!plane.rtl.done_climb) {
-            plane.roll_limit_cd = MIN(plane.roll_limit_cd, plane.g.level_roll_limit*100);
-            plane.nav_roll_cd = constrain_int32(plane.nav_roll_cd, -plane.roll_limit_cd, plane.roll_limit_cd);
-        }
-    }
-}
-
-
-#if false
-
-bool ModeAuto::_enter()
-{
-    plane.throttle_allows_nudging = true;
-    plane.auto_throttle_mode = true;
-    plane.auto_navigation_mode = true;
-    if (plane.quadplane.available() && plane.quadplane.enable == 2) {
-        plane.auto_state.vtol_mode = true;
-    } else {
-        plane.auto_state.vtol_mode = false;
-    }
-    plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
-    // start or resume the mission, based on MIS_AUTORESET
-    plane.mission.start_or_resume();
-
-    if (hal.util->was_watchdog_armed()) {
-        if (hal.util->persistent_data.waypoint_num != 0) {
-            gcs().send_text(MAV_SEVERITY_INFO, "Watchdog: resume WP %u", hal.util->persistent_data.waypoint_num);
-            plane.mission.set_current_cmd(hal.util->persistent_data.waypoint_num);
-            hal.util->persistent_data.waypoint_num = 0;
-        }
-    }
-
-#if SOARING_ENABLED == ENABLED
-    plane.g2.soaring_controller.init_cruising();
-#endif
-
-    return true;
-}
-
-void ModeAuto::_exit()
+void ModeSmartRTL::_exit()
 {
     if (plane.mission.state() == AP_Mission::MISSION_RUNNING) {
         plane.mission.stop();
-
-        if (plane.mission.get_current_nav_cmd().id == MAV_CMD_NAV_LAND &&
-            !plane.quadplane.is_vtol_land(plane.mission.get_current_nav_cmd().id))
-        {
-            plane.landing.restart_landing_sequence();
-        }
     }
     plane.auto_state.started_flying_in_auto_ms = 0;
 }
 
-void ModeAuto::update()
+void ModeSmartRTL::update()
 {
+
     if (plane.mission.state() != AP_Mission::MISSION_RUNNING) {
         // this could happen if AP_Landing::restart_landing_sequence() returns false which would only happen if:
         // restart_landing_sequence() is called when not executing a NAV_LAND or there is no previous nav point
-        plane.set_mode(plane.mode_rtl, ModeReason::MISSION_END);
-        gcs().send_text(MAV_SEVERITY_INFO, "Aircraft in auto without a running mission");
+        AP_Mission::mission_state temp_stat = plane.mission.state();
+        // gcs().send_text(MAV_SEVERITY_INFO, "mission state + %u", temp_stat);
+        plane.mission.resume_flyback();
+        
+        //plane.set_mode(plane.mode_rtl, ModeReason::MISSION_END);
+        //gcs().send_text(MAV_SEVERITY_INFO, "Aircraft in srtl without a running mission");
         return;
     }
 
+    // AP_Mission::mission_state temp_stat = plane.mission.state();
+    // gcs().send_text(MAV_SEVERITY_INFO, "mission state restarted + %u", temp_stat);
     uint16_t nav_cmd_id = plane.mission.get_current_nav_cmd().id;
 
     if (plane.quadplane.in_vtol_auto()) {
@@ -135,5 +120,3 @@ void ModeAuto::update()
         plane.calc_throttle();
     }
 }
-
-#endif

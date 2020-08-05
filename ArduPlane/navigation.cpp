@@ -81,6 +81,7 @@ void Plane::navigate()
     }
 
     if (next_WP_loc.lat == 0 && next_WP_loc.lng == 0) {
+        gcs().send_text(MAV_SEVERITY_INFO, "next_WP_loc is empty");
         return;
     }
 

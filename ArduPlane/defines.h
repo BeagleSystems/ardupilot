@@ -43,6 +43,7 @@ enum failsafe_action_long {
     FS_ACTION_LONG_RTL = 1,
     FS_ACTION_LONG_GLIDE = 2,
     FS_ACTION_LONG_PARACHUTE = 3,
+    FS_ACTION_LONG_SMART_RTL = 4,
 };
 
 // type of stick mixing enabled

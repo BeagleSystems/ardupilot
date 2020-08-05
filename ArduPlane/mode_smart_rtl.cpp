@@ -76,7 +76,7 @@ void ModeSmartRTL::update()
     if (plane.mission.state() != AP_Mission::MISSION_RUNNING) {
         // this could happen if AP_Landing::restart_landing_sequence() returns false which would only happen if:
         // restart_landing_sequence() is called when not executing a NAV_LAND or there is no previous nav point
-        AP_Mission::mission_state temp_stat = plane.mission.state();
+        // AP_Mission::mission_state temp_stat = plane.mission.state();
         // gcs().send_text(MAV_SEVERITY_INFO, "mission state + %u", temp_stat);
         plane.mission.resume_flyback();
         

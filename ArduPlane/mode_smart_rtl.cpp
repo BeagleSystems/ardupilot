@@ -41,18 +41,6 @@ bool ModeSmartRTL::_enter()
     #if SOARING_ENABLED == ENABLED
         plane.g2.soaring_controller.init_cruising();
     #endif
-        // ready to do smart RTL
-        // plane.throttle_allows_nudging = true;
-        // plane.auto_throttle_mode = true;
-        // plane.auto_navigation_mode = true;
-        // plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
-
-        // //set mission state to flyback
-        // uint16_t cur_idx = plane.mission.get_current_nav_index();
-        // gcs().send_text(MAV_SEVERITY_INFO, "Enter SmartRTL mode with wp idx=%u", static_cast<unsigned>(cur_idx));
-        // //waypoints rewind will be handled in Plane::update_navigation() in task SCHED_TASK(navigate,10,150)
-        // // plane.mission.set_current_cmd(cur_idx);
-        // plane.mission.start_fly_back(cur_idx);
     }
     else // go back to normal RTL
     {

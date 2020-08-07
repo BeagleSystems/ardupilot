@@ -11,36 +11,59 @@
 // The idea of smart RTL is if drone cleared any of way points from AUTO mission, it just need to fly back exactly as how it went there.
 */
 
+bool is_half_done(uint16_t cid, uint16_t total)
+{
+    uint16_t half = (uint16_t)total/2 - 1;
+    return (cid > half);
+}
+
 bool ModeSmartRTL::_enter()
 {      
     // check mission state to find out if smart RTL is needed
     // if current nav cmd index in list is not 0
     uint16_t cur_idx = plane.mission.get_current_nav_index();
-    gcs().send_text(MAV_SEVERITY_INFO, "Enter SmartRTL mode with wp idx=%u", static_cast<unsigned>(cur_idx));
+    uint16_t total_cmd = plane.mission.get_cmd_count();
+    gcs().send_text(MAV_SEVERITY_INFO, "Enter SmartRTL mode with wp idx=%u / %u", static_cast<unsigned>(cur_idx), static_cast<unsigned>(total_cmd));
 
-    if(plane.mission.get_current_nav_index() != 0)
+    // if current nav index is not 0 then we are still in a mission
+    if(plane.mission.get_current_nav_index() > 1)
     {
-        plane.throttle_allows_nudging = true;
-        plane.auto_throttle_mode = true;
-        plane.auto_navigation_mode = true;
+        // Two assumptions here to make SRTL dicision:
+        // 1. the takeoff and landing location need to be the same location as HOME position
+        // 2. all the waypoints should be set equally spaced, so we can count the number of wps instead of calculate the distances
+        // if current mission is half done, we should continue the auto mission in stead of fly all the way back 
 
-        plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
-        // start or resume the mission, based on MIS_AUTORESET
-        //uint16_t cur_idx = plane.mission.get_current_nav_index();
-        plane.mission.set_force_resume(true);
-        //plane.mission.start_or_resume();
-
-        if (hal.util->was_watchdog_armed()) {
-            if (hal.util->persistent_data.waypoint_num != 0) {
-                gcs().send_text(MAV_SEVERITY_INFO, "Watchdog: resume WP %u", hal.util->persistent_data.waypoint_num);
-                plane.mission.set_current_cmd(hal.util->persistent_data.waypoint_num);
-                hal.util->persistent_data.waypoint_num = 0;
-            }
+        if(is_half_done(cur_idx, total_cmd))
+        {
+            //if already passed half wps, more safe to finish the mission
+            return false;
+            // will auto go back to former mode in system.cpp
         }
+        else
+        {
+            /* do SMART RTL */
+            plane.throttle_allows_nudging = true;
+            plane.auto_throttle_mode = true;
+            plane.auto_navigation_mode = true;
 
-    #if SOARING_ENABLED == ENABLED
-        plane.g2.soaring_controller.init_cruising();
-    #endif
+            plane.next_WP_loc = plane.prev_WP_loc = plane.current_loc;
+            // start or resume the mission, based on MIS_AUTORESET
+            //uint16_t cur_idx = plane.mission.get_current_nav_index();
+            plane.mission.set_force_resume(true);
+            //plane.mission.start_or_resume();
+
+            if (hal.util->was_watchdog_armed()) {
+                if (hal.util->persistent_data.waypoint_num != 0) {
+                    gcs().send_text(MAV_SEVERITY_INFO, "Watchdog: resume WP %u", hal.util->persistent_data.waypoint_num);
+                    plane.mission.set_current_cmd(hal.util->persistent_data.waypoint_num);
+                    hal.util->persistent_data.waypoint_num = 0;
+                }
+            }
+
+        #if SOARING_ENABLED == ENABLED
+            plane.g2.soaring_controller.init_cruising();
+        #endif
+            }
     }
     else // go back to normal RTL
     {

@@ -477,6 +477,12 @@ public:
         return _do_cmd.id;
     }
 
+    // get total cmd count of the mission
+    uint16_t get_cmd_count() const
+    {
+        return _cmd_total;
+    }
+
     // set_current_cmd - jumps to command specified by index
     bool set_current_cmd(uint16_t index, bool rewind = false);
 

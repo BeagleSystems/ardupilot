@@ -231,7 +231,6 @@ public:
     void update() override;
 
 protected:
-
     bool _enter() override;
     void _exit() override;
 };

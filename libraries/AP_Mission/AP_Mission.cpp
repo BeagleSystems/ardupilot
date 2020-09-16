@@ -1817,7 +1817,11 @@ bool AP_Mission::retreat_current_nav_cmd(uint16_t starting_index)
             _flags.nav_cmd_loaded = true;
         }
     }
-
+    else
+    {
+        // if it's not nav cmd or it's not WP
+        return false;
+    }
 
     // if we have not found a do command then set flag to show there are no do-commands to be run before nav command completes
     _flags.do_cmd_all_done = true;
